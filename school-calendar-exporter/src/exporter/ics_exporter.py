@@ -1,4 +1,5 @@
 """Export events to ICS (iCalendar) format."""
+from __future__ import annotations
 
 from datetime import date, datetime, time
 from pathlib import Path
