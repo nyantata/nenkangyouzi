@@ -19,6 +19,7 @@ from rich.panel import Panel
 load_dotenv()
 
 from src.ai.analyzer import Analyzer
+from src.ai.local_analyzer import DEFAULT_BASE_URL, DEFAULT_MODEL, LocalAnalyzer
 from src.exporter.csv_exporter import export_csv
 from src.exporter.ics_exporter import export_ics
 from src.parser import get_parser
@@ -66,6 +67,21 @@ def parse_args() -> argparse.Namespace:
         default=str(OUTPUT_DIR),
         help=f"出力ディレクトリ（デフォルト: {OUTPUT_DIR}）",
     )
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="ローカルLLM（Ollama等）を使用する（ANTHROPIC_API_KEY 不要）",
+    )
+    parser.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        help=f"ローカルLLMのモデル名（デフォルト: {DEFAULT_MODEL}）",
+    )
+    parser.add_argument(
+        "--base-url",
+        default=DEFAULT_BASE_URL,
+        help=f"ローカルLLMサーバーのURL（デフォルト: {DEFAULT_BASE_URL}）",
+    )
     return parser.parse_args()
 
 
@@ -97,8 +113,11 @@ def resolve_api_key() -> str:
 def run_analysis(
     file_path: str,
     categories: list[dict],
-    api_key: str,
     use_cache: bool,
+    api_key: str | None = None,
+    local: bool = False,
+    local_model: str = DEFAULT_MODEL,
+    local_base_url: str = DEFAULT_BASE_URL,
 ) -> list[dict]:
     """Extract text, optionally use cache, run AI analysis."""
     if use_cache:
@@ -115,10 +134,19 @@ def run_analysis(
         console.print("[red]テキストを抽出できませんでした。ファイルを確認してください。[/red]")
         sys.exit(1)
 
-    console.print(
-        f"[dim]テキスト抽出完了: {len(text)} 文字。Claude APIで解析中...[/dim]"
-    )
-    analyzer = Analyzer(api_key=api_key)
+    if local:
+        console.print(
+            f"[dim]テキスト抽出完了: {len(text)} 文字。ローカルLLM（{local_model}）で解析中...[/dim]"
+        )
+        analyzer: Analyzer | LocalAnalyzer = LocalAnalyzer(
+            base_url=local_base_url, model=local_model
+        )
+    else:
+        console.print(
+            f"[dim]テキスト抽出完了: {len(text)} 文字。Claude APIで解析中...[/dim]"
+        )
+        analyzer = Analyzer(api_key=api_key)
+
     events = analyzer.analyze(text, categories)
 
     if use_cache:
@@ -148,7 +176,14 @@ def main() -> None:
         console.print(f"[red]ファイルが見つかりません: {file_path}[/red]")
         sys.exit(1)
 
-    api_key = resolve_api_key()
+    if args.local:
+        console.print(
+            f"[cyan]ローカルLLMモード: {args.model} ({args.base_url})[/cyan]"
+        )
+        api_key = None
+    else:
+        api_key = resolve_api_key()
+
     categories = load_categories()
 
     # --- Analysis loop (supports re-analysis) ---
@@ -157,8 +192,11 @@ def main() -> None:
         events = run_analysis(
             file_path,
             categories,
-            api_key,
             use_cache=not args.no_cache,
+            api_key=api_key,
+            local=args.local,
+            local_model=args.model,
+            local_base_url=args.base_url,
         )
 
         if not events:
