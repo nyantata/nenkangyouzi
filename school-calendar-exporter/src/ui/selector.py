@@ -1,4 +1,5 @@
 """Interactive CLI for category/grade selection and review step."""
+from __future__ import annotations
 
 import csv
 import io
