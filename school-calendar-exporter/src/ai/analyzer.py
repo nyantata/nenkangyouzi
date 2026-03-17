@@ -11,7 +11,7 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 MAX_RETRIES = 3
 # Claude's context window is large, but chunk if text exceeds this threshold
 MAX_TEXT_CHARS = 80_000
@@ -79,6 +79,13 @@ class Analyzer:
                     wait = 2 ** attempt
                     logger.info(f"Retrying in {wait}s...")
                     time.sleep(wait)
+            except (ValueError, json.JSONDecodeError) as e:
+                logger.warning(f"JSON parse error on attempt {attempt}: {e}")
+                last_error = e
+                if attempt < MAX_RETRIES:
+                    wait = 2 ** attempt
+                    logger.info(f"Retrying in {wait}s...")
+                    time.sleep(wait)
 
         raise RuntimeError(
             f"Claude API failed after {MAX_RETRIES} attempts: {last_error}"
@@ -86,6 +93,9 @@ class Analyzer:
 
     def _parse_response(self, raw: str) -> list[dict]:
         """Extract JSON from the model response and return events list."""
+        if not raw or not raw.strip():
+            raise ValueError("Empty response from API")
+
         # Strip markdown code fences if present
         match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
         if match:
@@ -96,9 +106,15 @@ class Analyzer:
             if match:
                 json_str = match.group(0)
             else:
-                raise ValueError(f"No JSON found in response:\n{raw[:500]}")
+                logger.debug(f"API response (first 500 chars): {raw[:500]}")
+                raise ValueError(f"No JSON found in response:\n{raw[:200]}")
 
-        data = json.loads(json_str)
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            logger.debug(f"JSON parse failed. Raw response (first 500 chars): {raw[:500]}")
+            raise ValueError(f"Invalid JSON in response: {e}") from e
+
         events = data.get("events", [])
         logger.info(f"Extracted {len(events)} events from API response")
         return events
